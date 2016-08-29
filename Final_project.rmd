@@ -1,0 +1,84 @@
+---
+title: "ML Final Project"
+author: "Fang Yuan"
+date: "July 31, 2016"
+output: html_document
+---
+## Introduction
+This project is to classify the exercise manner from personal related data. Training data is from:  https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv, and test data is from: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv. To accuratly build model and apply cross validation, 4 machine learning algothrism: decision trees, bagging, random forest, and boosting will be used and compared. 5-fold cross validation will be applied to get the optimal result. Then the selected machine learning althorism will be applied once on the test dataset.
+
+## Data prepare
+Read in data:
+```{r, message=FALSE}
+library(caret)
+library(randomForest)
+library(gbm)
+train <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+test <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+Remove the variables that have 60% and above of NAs or missing values, and remove redundant variables. Variables like X and user_name won't contribute to the model, so we remove them as well.
+```{r, message=FALSE}
+trainsub1 <-train[sapply(train, function(x){
+    length(unique(x)) > 1 & sum(is.na(x)|x=="") <= 0.6*nrow(train)
+})]
+trainsub2 <- trainsub1[,-(1:2)]
+```
+In unsupervised learning, variables that doesn't have too much variability doesn't contribute too much to the model. So we remove variables that have one level more then 95% of all the values.
+```{r}
+perc <- sapply(trainsub2, function(x){
+    max(table(x)/nrow(trainsub2))
+})
+perc[order(perc, decreasing = TRUE)][1:10]
+trainsub <- trainsub2[,-which(colnames(trainsub2)=="new_window")]
+```
+We see that besides new_window, other variables all have property varibility. We drop new_window.  
+
+## Create training and test dataset
+```{r}
+inTrain <- createDataPartition(y=trainsub$classe, p=0.7, list=FALSE)
+training <- trainsub[inTrain,]
+testing <- trainsub[-inTrain,]
+dim(training); dim(testing);
+```
+
+## Model training
+I'll build a single decision tree as a start:
+### Decision Tree  
+```{r}
+treefit <- train(classe ~ ., method="rpart", data=training)
+print(treefit$finalModel)
+plot(treefit$finalModel, uniform=TRUE, main="Classification Tree")
+text(treefit$finalModel, all=TRUE, cex=0.7)
+sum(predict(treefit, newdata=testing)==testing$classe)/nrow(testing)
+```
+We see that single classification tree give a prediction accuracy of about 63%.
+
+### bagging   
+```{r}
+treebag <- bag(training[,-57], training[,57], B=20, 
+               bagControl = bagControl(fit=ctreeBag$fit,
+                                       predict=ctreeBag$pred,
+                                       aggregate = ctreeBag$aggregate))
+sum(predict(treebag$fits[[1]]$fit, testing[,-57]) == testing$classe)/nrow(testing)
+```
+We see that adding boostrap aggregation framework, we increase our accuracy to about 96%
+
+### Random Forest   
+```{r}
+rffit <- randomForest(classe ~ ., data=training)
+sum(predict(rffit, testing[,-57]) == testing$classe)/nrow(testing)
+```
+Random Forest further increase the prediction accuracy to 99.9%.
+
+### Boosting   
+```{r}
+boofit <- gbm(classe~., data = training,verbose = FALSE, interaction.depth = 3, shrinkage = 0.05, n.trees = 500)
+pred <- predict(boofit,newdata =testing, n.trees = 500, type = "response")
+predict <- apply(pred[,,1],1,function(x){
+    colnames(pred[,,1])[x==max(x)]
+})
+sum(predict==testing$classe)/nrow(testing)
+```
+Boosting with each tree depth of 3, and shrink parameter 0.05 gives a final tree of 99.8% accuracy.  
+Bagging, random forest, boosting all give a high accuracy tree!
+
